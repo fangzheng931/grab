@@ -34,7 +34,7 @@ public class BaiduBaike {
 	public static void main(String[] args) {
 		log.info("start");
 		BaiduBaike baiduBaike = new BaiduBaike();
-		baiduBaike.grabBrief();
+//		baiduBaike.grabBrief();
 //		baiduBaike.grabBrief("健康医疗", "76625");
 		Progress progress = new Progress("detail", detailTable.count(null), 5000);
 		for (MongoBytesEntity entity : detailTable.find(null)) {
@@ -44,6 +44,9 @@ public class BaiduBaike {
 	}
 
 	private void parseDetail(MongoBytesEntity entity) {
+		if (parsedTable.exists(entity.getId())) {
+			return;
+		}
 		Document document = Jsoup.parse(new String(entity.getBytesContent()));
 		JSONObject json = new JSONObject();
 		JSONObject basic = new JSONObject();
@@ -81,7 +84,11 @@ public class BaiduBaike {
 						.fluentPut("title", div.select(".video-title").text())
 						.fluentPut("url", div.select("a").attr("abs:href")))
 				.collect(Collectors.toList()));
-		parsedTable.save(new MongoJsonEntity(entity.getId(), json, entity.getJsonMetadata()));
+		try {
+			parsedTable.save(new MongoJsonEntity(entity.getId(), json, entity.getJsonMetadata()));//TODO key contains dot '.'
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
 	}
 
 	private void grabDetail(MongoJsonEntity entity) {

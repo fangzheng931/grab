@@ -35,7 +35,11 @@ public class DxyDrug {//TODO 验证码+每日访问限制
 	private HttpClient client = new HttpClient();
 
 	public static void main(String[] args) {
-		new DxyDrug().grabBrief();
+		DxyDrug dxyDrug = new DxyDrug();
+		dxyDrug.grabBrief();
+//		for (MongoJsonEntity entity : briefTable.find(null)) {
+//			dxyDrug.grabDetail(entity.getId());
+//		}
 	}
 
 	private Document getDocument(String url, String s) {
@@ -90,7 +94,7 @@ public class DxyDrug {//TODO 验证码+每日访问限制
 				totalPage = (count - 1) / 10 + 1;
 				log.info(String.format("%s %d items, %d pages", category, count, totalPage));
 			}
-			{//TODO save category list page
+			{//TODO save category list page and skip saved pages
 				Elements container = document.select("#container");
 				container.select("> :not(.common_hd):not(.common_bd):not(.pagination)").remove();
 			}
