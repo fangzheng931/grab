@@ -93,15 +93,22 @@ public class DxyDrug {//TODO 验证码+每日访问限制
 //				log.info(String.format("%s %d items, %d pages", category, count, totalPage));
             }
             {//TODO save category list page
-                String listId = prefix.replace("http://drugs.dxy.cn/category/", "")
+                String curId = prefix.replace("http://drugs.dxy.cn/category/", "")
                         .replace(".htm", "") + "-" + page;
+                String lastId = curId.replace("-" + page, "-" + totalPage);
                 //判断是否存在该页面
-                if (listTable.exists(listId)) {
+                if (listTable.exists(lastId)) {
+                    return;
+                } else if (listTable.exists(curId)) {
+                    while (listTable.exists(curId)) {
+                        curId = curId.replace("-" + page++, "-" + page);
+                    }
+                    page--;
                     continue;
                 }
                 Elements container = document.select("#container");
                 container.select("> :not(.common_hd):not(.common_bd):not(.pagination)").remove();
-                listTable.save(new MongoBytesEntity(listId, container.html().getBytes(), new JSONObject().fluentPut("url", url)));
+                listTable.save(new MongoBytesEntity(curId, container.html().getBytes(), new JSONObject().fluentPut("url", url)));
             }
             for (Element li : document.select(".result li")) {
                 String detailUrl = li.select("a").attr("abs:href");
