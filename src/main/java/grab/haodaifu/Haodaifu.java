@@ -22,28 +22,39 @@ import java.util.List;
 public class Haodaifu {
     private static final String database = "jiankangdangan";
     private static final MongoEntityClient mongo = new MongoEntityClient("101.132.96.214", 27017, "jiankangdangan", "jiankangdangan_user", "shanzhen@2020");
-    //    private static final MongoEntityTable<MongoJsonEntity> listTable = mongo.getJsonTable(database, "Haodaifu-List");
-    private static final MongoEntityTable<MongoJsonEntity> briefTable = mongo.getJsonTable(database, "HaodaifuJibing-Brief");
-    private static final MongoEntityTable<MongoBytesEntity> detailTable = mongo.getBytesTable(database, "HaodaifuJibing-Detail");
-    private static final MongoEntityTable<MongoJsonEntity> parsedTable = mongo.getJsonTable(database, "HaodaifuJibing-Parsed");
+    private static final MongoEntityTable<MongoJsonEntity> briefTable = mongo.getJsonTable(database, "Haodaifu.disease-Brief");
+    private static final MongoEntityTable<MongoBytesEntity> detailTable = mongo.getBytesTable(database, "Haodaifu.disease-Detail");
+    private static final MongoEntityTable<MongoJsonEntity> parsedTable = mongo.getJsonTable(database, "Haodaifu.disease-Parsed");
+    private static final MongoEntityTable<MongoJsonEntity> articleTable = mongo.getJsonTable(database, "Haodaifu.articles");
+    private static final MongoEntityTable<MongoJsonEntity> topicTable = mongo.getJsonTable(database, "Haodaifu.topics");
 //    private static final MongoEntityTable<MongoJsonEntity> standardTable = mongo.getJsonTable(database, "Haodaifu-Standard");
 
     private HttpClient client = new HttpClient();
 
     public static void main(String[] args) {
         Haodaifu haodaifu = new Haodaifu();
+
 //        haodaifu.grabBrief();
 //        Progress progress = new Progress("brief", briefTable.count(null), 5000);
 //        for (MongoJsonEntity entity : briefTable.find(null)) {
 //            haodaifu.grabDetail(entity);
 //            progress.increase(1);
 //        }
-        Progress progress = new Progress("detail", briefTable.count(null), 5000);
-        for (MongoBytesEntity bytesEntity : detailTable.find(null)) {
-            haodaifu.parseDetail(bytesEntity);
+//        Progress progress = new Progress("detail", briefTable.count(null), 30000);
+//        for (MongoBytesEntity bytesEntity : detailTable.find(null)) {
+//            haodaifu.parseDetail(bytesEntity);
+//            progress.increase(1);
+//        }
+        Progress progress = new Progress("brief->article", briefTable.count(null), 30000);
+        for (MongoJsonEntity entity : briefTable.find(null)) {
+            haodaifu.grabArticle(entity);
             progress.increase(1);
         }
-
+//        Progress progress = new Progress("brief->topic", briefTable.count(null), 30000);
+//        for (MongoJsonEntity entity : briefTable.find(null)) {
+//            haodaifu.grabTopic(entity);
+//            progress.increase(1);
+//        }
     }
 
     private void grabBrief() {
@@ -89,8 +100,6 @@ public class Haodaifu {
         JSONObject content = new JSONObject();
         String name = document.select(".s-cur > a").text();
         content.put("name", name);
-        String title = document.select(".dis-title").text();
-        content.put("title", title);
         Elements p = document.select(".dis-obj");
         String introduction = p.text().replace("全文阅读>", "");
         content.put("introduction", introduction);
@@ -122,7 +131,7 @@ public class Haodaifu {
         json.put("description", description);
 
         Elements content = document.select(".recommend_main");
-        if (!content.isEmpty()) {
+        {
             List<JSONObject> paragraphs = new ArrayList<>();
             json.put("paragraphs", paragraphs);
             JSONObject paragraph = null;
@@ -134,21 +143,19 @@ public class Haodaifu {
             }
         }
         String url = (String) entity.getJsonMetadata().get("url");
-        getArticle(url, json);
-        getTopic(url, json);
+
         parsedTable.save(new MongoJsonEntity(entity.getId(), json, entity.getJsonMetadata()));
     }
 
-    private void getTopic(String url, JSONObject json) {
-        String topicUrl = url.replace("jieshao.htm", "topic_0_1.htm");
-        Document topicList = client.tryGet(topicUrl, -1, HttpContent::toDocument, d -> !d.select(".d-nav-con .s-cur").isEmpty());
+    private void grabTopic(MongoJsonEntity entity) {
+        String url = "https://www.haodf.com/jibing/" + entity.getId() + "/topic_0_1.htm";
+        Document topicList = client.tryGet(url, -1, HttpContent::toDocument, d -> !d.select(".d-nav-con .s-cur").isEmpty());
         int totalPage = 1;
         if (!topicList.select(".page_turn font").isEmpty()) {
             totalPage = Integer.valueOf(topicList.select(".page_turn font").text());
         }
-        System.out.println(json.getString("title") + " [topic] " + totalPage);
-        List<JSONObject> topicJsonList = new ArrayList<>();
-        json.put("topic", topicJsonList);
+
+        String category = entity.getJsonContent().getString("name");
         for (int i = 1; i <= totalPage; ++i) {
             for (Element element : topicList.select(".kart_li")) {
                 String title = element.select(".bb_e5 .kart_title").text();
@@ -156,58 +163,74 @@ public class Haodaifu {
                 String publishedTime = element.select(".bb_e5 .fr").text().replace("发布时间：", "");
 
                 String content = element.select(".kart_con").text().replace("查看全文>>", "");
-                String DetailUrl = element.select(".kart_con a").attr("abs:href");
+                String detailUrl = element.select(".kart_con a").attr("abs:href");
+                String id;
+                if (detailUrl.contains("https://www.haodf.com/paperdetail/")) {
+                    id = detailUrl.replace("https://www.haodf.com/paperdetail/", "").replace(".htm", "");
+                } else {
+                    id = detailUrl.replace("https://www.haodf.com/zhuanjiaguandian/", "").replace(".htm", "");
+                }
                 JSONObject topic = new JSONObject();
                 topic.fluentPut("title", title)
                         .fluentPut("label", label)
                         .fluentPut("published_time", publishedTime)
                         .fluentPut("content", content)
-                        .fluentPut("DetailUrl", DetailUrl);
-                topicJsonList.add(topic);
+                        .fluentPut("detail_url", detailUrl);
+                topicTable.save(new MongoJsonEntity(id, topic));
+                topicTable.addToMetadata(id, "category", new JSONObject().fluentPut("name", category));
             }
-            topicUrl = topicUrl.replace(i + ".htm", (i + 1) + ".htm");
-            topicList = client.tryGet(topicUrl, -1, HttpContent::toDocument, d -> !d.select(".d-nav-con .s-cur").isEmpty());
+            url = url.replace(i + ".htm", (i + 1) + ".htm");
+            topicList = client.tryGet(url, -1, HttpContent::toDocument, d -> !d.select(".d-nav-con .s-cur").isEmpty());
         }
     }
 
-    private void getArticle(String url, JSONObject json) {
-        String articleUrl = url.replace("jieshao.htm", "article_0_1.htm");
-        Document articleList = client.tryGet(articleUrl, -1, HttpContent::toDocument, d -> !d.select(".d-nav-con .s-cur").isEmpty());
+    private void grabArticle(MongoJsonEntity entity) {
+        String url = "https://www.haodf.com/jibing/" + entity.getId() + "/article_0_1.htm";
+        String category = entity.getJsonContent().getString("name");
+        Document articleList = client.tryGet(url, -1, HttpContent::toDocument, d -> !d.select(".d-nav-con .s-cur").isEmpty());
         int totalPage = 1;
-
         if (!articleList.select(".page_turn font").isEmpty()) {
             totalPage = Integer.valueOf(articleList.select(".page_turn font").text());
         }
-        System.out.println(json.getString("title") + " [article] " + totalPage);
-        List<JSONObject> articleJsonList = new ArrayList<>();
-        json.put("article", articleJsonList);
 
         for (int i = 1; i <= totalPage; ++i) {
             for (Element element : articleList.select(".dis_article")) {
                 String title = element.select(".article_title a").text();
                 String publishedTime = element.select(".article_title span").text().replace("发表时间: ", "");
-                Element a = element.select(".docmsg-right > p > a").first();
-                String author = a.text();
-                String position = a.nextElementSibling().text();
-                String hospital = a.nextElementSibling().nextElementSibling().text();
-                String department = a.nextElementSibling().nextElementSibling().nextElementSibling().text();
+                Element p = element.select(".docmsg-right > p").first();
+                String name = p.select("> a").text();
+                String position = "";
+                String hospital = "";
+                String department = "";
+                Elements spans = p.select("> span");
+                if (spans.size() == 3) {
+                    position = spans.get(0).text();
+                    hospital = spans.get(1).text();
+                    department = spans.get(2).text();
+                } else if (spans.size() == 2) {
+                    hospital = spans.get(0).text();
+                    department = spans.get(1).text();
+                }
+                if (position.equals("") || hospital.equals("") || department.equals("")) {
+                    System.out.println(category + " -page " + i + " -ti " + title + " -po " + position + " -ho " + hospital + " -de " + department);
+                }
                 String content = element.select(".con").text().replace("查看全文>>", "");
-                String DetailUrl = element.select(".con a").attr("abs:href");
-                String id = DetailUrl.replace("https://www.haodf.com/zhuanjiaguandian/", "").replace(".htm", "");
-                JSONObject article = new JSONObject();
-                article.fluentPut("id", id)
-                        .fluentPut("title", title)
-                        .fluentPut("author", author)
-                        .fluentPut("published_time", publishedTime)
+                String detailUrl = element.select(".con a").attr("abs:href");
+                String id = detailUrl.replace("https://www.haodf.com/zhuanjiaguandian/", "").replace(".htm", "");
+                JSONObject author = new JSONObject().fluentPut("name", name)
                         .fluentPut("position", position)
                         .fluentPut("hospital", hospital)
-                        .fluentPut("department", department)
+                        .fluentPut("department", department);
+                JSONObject article = new JSONObject().fluentPut("title", title)
+                        .fluentPut("author", author)
+                        .fluentPut("published_time", publishedTime)
                         .fluentPut("content", content)
-                        .fluentPut("DetailUrl", DetailUrl);
-                articleJsonList.add(article);
+                        .fluentPut("detail_url", detailUrl);
+                articleTable.save(new MongoJsonEntity(id, article));
+                articleTable.addToMetadata(id, "category", new JSONObject().fluentPut("name", category));
             }
-            articleUrl = articleUrl.replace(i + ".htm", (i + 1) + ".htm");
-            articleList = client.tryGet(articleUrl, -1, HttpContent::toDocument, d -> !d.select(".d-nav-con .s-cur").isEmpty());
+            url = url.replace(i + ".htm", (i + 1) + ".htm");
+            articleList = client.tryGet(url, -1, HttpContent::toDocument, d -> !d.select(".d-nav-con .s-cur").isEmpty());
         }
     }
 }
