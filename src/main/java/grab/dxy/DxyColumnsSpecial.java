@@ -32,7 +32,7 @@ public class DxyColumnsSpecial extends DxyColumns {
 		String prefix = "https://dxy.com/view/i/columns/special/list?";
 		for (int page = 1, totalPage = -1; page == 1 || page <= totalPage; page++) {
 			String url = prefix + "&items_per_page=1000&page_index=" + page;
-			log.info(url);
+//			log.info(url);
 			JSONObject json = client.tryGet(url, -1).toJSONObject();
 			if (totalPage == -1) {
 				totalPage = (int) JSONPath.eval(json, "data.total_pages");
@@ -45,7 +45,7 @@ public class DxyColumnsSpecial extends DxyColumns {
 
 	private void grabColumn(String columnId) {
 		String columnUrl = "https://dxy.com/column/special/" + columnId;
-		log.info(columnUrl);
+//		log.info(columnUrl);
 		Document document = client.tryGet(columnUrl, -1, HttpContent::toDocument, d -> !d.select(".col-article-list").isEmpty());
 		String columnTitle = document.select(".col-special-title").text();
 		for (Element li : document.select(".col-article-list > ul > li")) {

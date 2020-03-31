@@ -1,8 +1,6 @@
 package grab.medlive;
 
 import com.alibaba.fastjson.JSONObject;
-import com.mongodb.MongoClient;
-import com.mongodb.client.MongoCollection;
 import com.wayue.olympus.common.Progress;
 import com.wayue.olympus.common.http.HttpClient;
 import com.wayue.olympus.common.http.HttpContent;
@@ -15,240 +13,334 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class Medlive {
     private static final String database = "jiankangdangan";
     private static final MongoEntityClient mongo = new MongoEntityClient("101.132.96.214", 27017, database, "jiankangdangan_user", "shanzhen@2020");
+    private static final MongoEntityTable<MongoJsonEntity> briefTable = mongo.getJsonTable(database, "medlive-Brief");
+    private static final MongoEntityTable<MongoJsonEntity> detailTable = mongo.getJsonTable(database, "medlive-Detail");
     private static final MongoEntityTable<MongoJsonEntity> parsedTable = mongo.getJsonTable(database, "medlive-Parsed");
 
-    private static final MongoClient mongoClient = mongo.getMongo();
     private HttpClient client = new HttpClient();
 
+    private static final HashMap<String, String> map = new HashMap<>();
+
     public static void main(String[] args) {
+
+//        new Medlive().grabBrief();
         Medlive medlive = new Medlive();
-        MongoCollection<org.bson.Document> collection = mongoClient.getDatabase(database).getCollection("medlive");
-        Progress progress = new Progress("detail->parsed", collection.countDocuments(), 5000);
-        for (org.bson.Document entity : collection.find()) {
-            medlive.parsedDetail(entity);
+//        Progress progress = new Progress("brief", briefTable.count(null), 5000);
+//        for (MongoJsonEntity entity : briefTable.find(null)) {
+//            medlive.grabDetail(entity);
+//            progress.increase(1);
+//        }
+        medlive.initMap();
+        Progress progress = new Progress("detail", detailTable.count(null), 5000);
+        for (MongoJsonEntity entity : detailTable.find(null)) {
+            medlive.parseDetail(entity);
             progress.increase(1);
         }
-    }
-
-    private void parsedDetail(org.bson.Document entity) {
-        String prefix = "http://disease.medlive.cn/wiki/entry/";
-        String url = (String) entity.get("url");
-        if (!url.contains(prefix + "1")) {
-            return;
-        }
-        Document document = Jsoup.parse((String) entity.get("html"));
-        document.select(".sideBar").remove();
-        String id = url.replace(prefix, "");
-        String categoryId = id.split("_")[1];
-        id = id.split("_")[0];
-        if (parsedTable.exists(id)) {
-            MongoJsonEntity jsonEntity = parsedTable.get(id);
-            JSONObject jsonContent = jsonEntity.getJsonContent();
-            addToContent(document, jsonContent, categoryId);
-            parsedTable.save(new MongoJsonEntity(jsonEntity.getId(), jsonContent));
-        } else {
-            JSONObject jsonContent = new JSONObject();
-            setBaseInfo(id, prefix, jsonContent);
-            addToContent(document, jsonContent, categoryId);
-            parsedTable.save(new MongoJsonEntity(id, jsonContent));
-        }
-    }
-
-    private void setBaseInfo(String id, String prefix, JSONObject content) {
-        String url = prefix + id + "_101_0";
-        Document document = client.tryGet(url, -1, HttpContent::toDocument, d -> !d.select(".main").isEmpty());
-
-        {//设置名字简介
-            Elements h3 = document.select(".knw_overview h3 > span");
-            content.put("name", h3.text().replace(" -", ""));
-            Elements summary = document.select(".summary");
-            List<JSONObject> list = new ArrayList<>();
-            content.put("introduction", list);
-            JSONObject introduction;
-            for (Element li : summary.select("li")) {
-                introduction = new JSONObject().fluentPut("text", li.text());
-                list.add(introduction);
-            }
-        }
-        {//设置名称编码
-            url = prefix + id + "_102_0";
-            document = client.tryGet(url, -1, HttpContent::toDocument, d -> !d.select(".main").isEmpty());
-            List<JSONObject> list = new ArrayList<>();
-            content.put("nameCoding", list);
-            JSONObject nameCoding;
-            Elements table = document.select(".nameCoding");
-            for (Element li : table.select("li")) {
-                String title = li.select("span").text().replace("：", "");
-                String text = li.select("p").text();
-                nameCoding = new JSONObject().fluentPut("title", title)
-                        .fluentPut("text", text);
-                list.add(nameCoding);
-            }
-        }
-    }
-
-    private void addToContent(Document document, JSONObject content, String categoryId) {
-        System.out.println(content.get("name") + "--" + categoryId);
-        switch (categoryId) {
-            case "401":
-            case "403":
-            case "404":
-            case "405":
-                parseMore(document, content);
-                break;
-            case "407":
-                parseTable(document, content);
-                break;
-            case "502":
-                parseLink(document, content);
-                break;
-            default:
-                parseSummary(document, content, categoryId);
-                break;
-        }
-
 
     }
 
-    private void parseSummary(Document document, JSONObject content, String categoryId) {
+    private void initMap() {
+        map.put("简介", "introduction");
+        map.put("名称与编码", "nameCoding");
+        map.put("定义", "define");
+        map.put("病因", "cause");
+        map.put("病理解剖", "pathologicalAnatomy");
+        map.put("病理生理", "pathophysiology");
+        map.put("预防", "prevent");
+        map.put("筛检", "screening");
+        map.put("问诊与查体", "interrogationAndExamination");
+        map.put("辅助检查", "auxiliaryInspection");
+        map.put("并发症", "complications");
+        map.put("诊断标准", "diagnosticCriteria");
+        map.put("治疗目标", "targetOfTreatment");
+        map.put("预后", "prognosis");
+    }
 
-        if (!document.select(".define").isEmpty()) {
-            System.out.println(content.get("name") + "-define-" + categoryId);
-            Elements div = document.select(".define");
-            JSONObject define = new JSONObject();
-            define.put("wiki_editor", div.select(".wiki_editor > a").text());
-            List<JSONObject> list = new ArrayList<>();
-            define.put("description", list);
-            JSONObject description;
-            for (Element element : div.select("> .descrip")) {
-                description = new JSONObject().fluentPut("content", element.select("> div").text())
-                        .fluentPut("source", element.select("> p").text().replace("来源：", ""));
-                list.add(description);
-            }
-            JSONObject basis = content.getJSONObject("basis");
-            if (basis == null) {
-                basis = new JSONObject();
-            }
-            String title = document.select(".knw_thorough .hd").text();
-            basis.put(title, define);
-            content.put("basis", basis);
-        } else {
-            Elements div = document.select(".summary");
-            JSONObject o = new JSONObject();
-            o.put("wiki_editor", div.select(".wiki_editor > a").text());
-            o.put("text", div.select(".editor_mirror").text());
-            List<JSONObject> list = new ArrayList<>();
-            o.put("references", list);
-            JSONObject text;
-            for (Element element : div.select(".references tr")) {
-                if (element.select("td").size() == 2) {
-                    text = new JSONObject().fluentPut("text", element.text());
-                    list.add(text);
+    private void grabBrief() {
+        Document categoryDocument = client.tryGet("http://disease.medlive.cn/wiki/list/171", -1, HttpContent::toDocument, null);
+        for (Element li : categoryDocument.select(".sortOutline li")) {
+            String category = li.select("> a").text();
+            String categoryUrl = li.select("> a").attr("abs:href");
+            String categoryId = categoryUrl.replace("http://disease.medlive.cn/wiki/list/", "");
+            Document document = client.tryGet(categoryUrl, -1, HttpContent::toDocument, null);
+            Elements dd = document.select(".sortDetail dd");
+            for (Element a : dd.select("> a")) {
+                if (a.text().equals("")) {
+                    continue;
                 }
+                String status = a.select("> span").text();
+                String briefUrl = a.attr("abs:href");
+                Document briefDocument = client.tryGet(briefUrl, -1, HttpContent::toDocument, null);
+                JSONObject o = new JSONObject().fluentPut("status", status.replace("(", "").replace(")", ""));
+                //没有 brief 页面时（有：http://disease.medlive.cn/gather/Alport%E7%BB%BC%E5%90%88%E5%BE%81
+                // 无：http://disease.medlive.cn/gather/%E8%83%86%E5%9B%8A%E7%99%8C）
+                if (briefDocument.select(".wiki_body").isEmpty()) {
+                    if (briefDocument.select(".main").isEmpty()) {
+                        System.out.println(category + "-" + briefUrl);
+                        continue;
+                    }
+                    String curUrl = briefDocument.select(".current").attr("abs:href");
+                    String[] strings = curUrl.split("_")[0].split("/");
+                    String id = strings[strings.length - 1];
+                    String url = "http://disease.medlive.cn/wiki/essentials_" + id;
+                    String name = briefDocument.select(".knw_overview > .hd span").text().replace(" -", "");
+                    o.put("url", url);
+                    o.put("name", name);
+                    briefTable.save(new MongoJsonEntity(id, o));
+                    briefTable.addToMetadata(id, "category", new JSONObject().fluentPut("id", categoryId).fluentPut("name", category));
+                    continue;
+                }
+                String url = briefDocument.select(".case_name > a").attr("abs:href");
+                String name = briefDocument.select(".case_name > label").text();
+                List<JSONObject> list = new ArrayList<>();
+                JSONObject caseObject = null;
+                for (Element boxTitle : briefDocument.select(".box_title")) {
+                    String title = boxTitle.select("> label").text();
+                    String text = boxTitle.nextElementSibling().text();
+                    caseObject = new JSONObject().fluentPut("title", title)
+                            .fluentPut("text", text);
+                    list.add(caseObject);
+                }
+                o.put("name", name);
+                o.put("url", url);
+                o.put("case", list);
+                String id = url.replace("http://disease.medlive.cn/wiki/essentials_", "");
+                briefTable.save(new MongoJsonEntity(id, o));
+                briefTable.addToMetadata(id, "category", new JSONObject().fluentPut("id", categoryId).fluentPut("name", category));
             }
-            String title = document.select(".knw_thorough .hd").text();
-            String category = "";
-            switch (categoryId.charAt(0)) {
-                case '1':
-                    category = "overview";
-                    break;
-                case '2':
-                    category = "basis";
-                    break;
-                case '3':
-                    category = "prevention";
-                    break;
-                case '4':
-                    category = "diagnosis";
-                    break;
-                case '5':
-                    category = "treatment";
-                    break;
-                case '6':
-                    category = "follow_up";
-                    break;
-            }
-            JSONObject jsonObject = content.getJSONObject(category);
-            if (jsonObject == null) {
-                jsonObject = new JSONObject();
-            }
-            jsonObject.put(title, o);
-            content.put(category, jsonObject);
+            System.out.println(categoryId + "-----" + category);
         }
     }
 
-    private void parseLink(Document document, JSONObject content) {
-        Elements rulesList = document.select(".Treatment_rules");
-        if (rulesList.size() == 0) {
+    private void grabDetail(MongoJsonEntity entity) {
+        String id = entity.getId();
+        String url = "http://disease.medlive.cn/wiki/entry/" + id + "_101_0";
+        Document document = client.tryGet(url, -1, HttpContent::toDocument, d -> !d.select(".main").isEmpty());
+        List<JSONObject> list = new ArrayList<>();
+        for (Element chapterList : document.select(".chapter")) {
+            String dt = chapterList.select("dt").text();
+            Elements elements = chapterList.select("a");
+            Elements nodata = elements.select(".nodata");
+            elements.removeAll(nodata);
+            for (Element a : elements) {
+                url = a.attr("abs:href");
+                if (!url.contains("http://disease.medlive.cn/wiki/entry/" + id)) {
+                    continue;
+                }
+                String detailId = url.split("_")[1];
+                String title = a.text();
+                Document detailDocument = client.tryGet(url, -1, HttpContent::toDocument, d -> !d.select(".main").isEmpty());
+                Elements select = detailDocument.select(".main");
+                JSONObject item = new JSONObject().fluentPut("title", title)
+                        .fluentPut("id", detailId)
+                        .fluentPut("category", dt)
+                        .fluentPut("html", select.html().getBytes());
+                list.add(item);
+            }
+        }
+        JSONObject json = new JSONObject().fluentPut("name", entity.getJsonContent().get("name")).fluentPut("htmls", list);
+        detailTable.save(new MongoJsonEntity(id, json, entity.getJsonMetadata()));
+    }
+
+    private void parseDetail(MongoJsonEntity entity) {
+        List<JSONObject> htmls = (List<JSONObject>) entity.getJsonContent().get("htmls");
+        String name = entity.getJsonContent().getString("name");
+        JSONObject json = new JSONObject().fluentPut("name", name);
+        for (JSONObject content : htmls) {
+            Document document = Jsoup.parse(new String(content.getBytes("html")));
+            String title = content.getString("title");
+            switch (title) {
+                case "名称与编码":
+                    parseNameCoding(document, json, title);
+                    break;
+                case "定义":
+                    parseDefine(document, json, title);
+                    break;
+                case "问诊与查体":
+                    parseMore1(document, json, title);
+                    break;
+                case "辅助检查":
+                    parseMore2(document, json, title);
+                    break;
+                case "并发症":
+                case "诊断标准":
+                    parseMore3(document, json, title);
+                    break;
+                case "简介":
+                case "病因":
+                case "病理解剖":
+                case "病理生理":
+                case "预防":
+                case "筛检":
+                case "治疗目标":
+                case "预后":
+                    parseDefault(document, json, title);
+                default:
+                    break;
+            }
+        }
+        parsedTable.save(new MongoJsonEntity(entity.getId(), json, entity.getJsonMetadata()));
+    }
+
+    private String getContentCategory(String category) {
+        return map.get(category);
+    }
+
+    private void getContentWikiEditor(Document document, JSONObject json) {
+        Elements select = document.select(".wiki_editor");
+        if (select.size() == 0) {
             return;
         }
-        String wiki_editor = rulesList.select(".wiki_editor a").text();
-        List<JSONObject> list = new ArrayList<>();
-        JSONObject jsonObject = new JSONObject().fluentPut("wiki_editor", wiki_editor)
-                .fluentPut("link_list", list);
-        JSONObject item = null;
-        for (Element li : rulesList.select("li")) {
-            Elements a = li.select("> a");
-            String title = a.text();
-            String url = a.attr("abs:href");
-            item = new JSONObject().fluentPut("title", title)
-                    .fluentPut("url",url);
-            list.add(item);
-        }
-        List<JSONObject> referencesList = new ArrayList<>();
-        jsonObject.put("references", referencesList);
-        JSONObject text = null;
-        for (Element element : rulesList.select(".references tr")) {
-            if (element.select("td").size() == 2) {
-                text = new JSONObject().fluentPut("text", element.text());
-                list.add(text);
-            }
-        }
-        JSONObject treatment = content.getJSONObject("treatment");
-        if (treatment == null) {
-            treatment = new JSONObject();
-        }
-        String title = document.select(".knw_thorough .hd").text();
-        treatment.put(title, jsonObject);
-        content.put("treatment", treatment);
+        String wiki_editor = select.select("a").text();
+        json.put("wiki_editor", wiki_editor);
     }
 
-    private void parseTable(Document document, JSONObject content) {
-        Elements diffTable = document.select(".diff_diag");
-        if (diffTable.size() == 0) {
+    private void getContentReferences(Document document, JSONObject json) {
+        Elements elements = document.select(".references");
+        if (elements.size() == 0) {
             return;
         }
-        String wiki_editor = diffTable.select(".wiki_editor a").text();
+        List<JSONObject> references = new ArrayList<>();
+        JSONObject reference = null;
+        for (Element tr : elements.select("tr")) {
+            if (tr.select("> td").size() != 2) {
+                continue;
+            }
+            reference = new JSONObject().fluentPut("text", tr.text());
+            references.add(reference);
+        }
+        json.put("references", references);
+    }
+
+
+    private void parseDefault(Document document, JSONObject content, String title) {
+        Elements summary = document.select(".summary > .editor_mirror");
+        String text = summary.text();
+        JSONObject object = new JSONObject().fluentPut("content", text);
+        getContentWikiEditor(document, object);
+        getContentReferences(document, object);
+        content.put(getContentCategory(title), object);
+    }
+
+    private void parseDefine(Document document, JSONObject content, String title) {
+        List<JSONObject> defines = new ArrayList<>();
+        JSONObject object = new JSONObject().fluentPut("defines", defines);
+        JSONObject define = null;
+        for (Element element : document.select(".define > .descrip")) {
+            String text = element.select("> div").text();
+            String source = element.select("> p").text().replace(element.select(".bold").text(), "");
+            define = new JSONObject().fluentPut("text", text)
+                    .fluentPut("source", source);
+            defines.add(define);
+        }
+        getContentWikiEditor(document, object);
+        getContentReferences(document, object);
+        content.put(getContentCategory(title), object);
+    }
+
+    private void parseNameCoding(Document document, JSONObject content, String title) {
+        List<JSONObject> nameCoding = new ArrayList<>();
+        JSONObject object = new JSONObject().fluentPut("nameCoding", nameCoding);
+        for (Element element : document.select(".codingItem")) {
+            JSONObject item = new JSONObject();
+            for (Element li : element.select("li")) {
+                String name = li.select("> span").text().replace("：", "");
+                String text = li.select("> p").text();
+                item.put(name, text);
+            }
+            nameCoding.add(item);
+        }
+        getContentWikiEditor(document, object);
+        getContentReferences(document, object);
+        content.put(getContentCategory(title), object);
+    }
+
+    private void parseMore1(Document document, JSONObject content, String title) {
+        JSONObject object = new JSONObject();
+        for (Element element : document.select(".dis_t2")) {
+            String listName = element.text();
+            List<JSONObject> list = new ArrayList<>();
+            object.put(listName, list);
+            Elements elements = element.nextElementSiblings();
+            JSONObject item = new JSONObject();
+            for (Element li : elements.select("li")) {
+                String name = li.select(".dis_t3").text();
+                String text = li.select(".dis_cont").text();
+                item.put("title", name);
+                item.put("text", text);
+                list.add(item);
+            }
+        }
+        getContentWikiEditor(document, object);
+        getContentReferences(document, object);
+        content.put(getContentCategory(title), object);
+    }
+
+    private void parseMore2(Document document, JSONObject content, String title) {
+        JSONObject object = new JSONObject();
+        for (Element element : document.select(".dis_t2")) {
+            String listName = element.text();
+            List<JSONObject> list = new ArrayList<>();
+            object.put(listName, list);
+            Elements elements = element.nextElementSiblings();
+            JSONObject item = new JSONObject();
+            for (Element li : elements.select("li")) {
+                String name = li.select(".dis_t3").text();
+                JSONObject table = new JSONObject();
+                for (Element tr : li.select(".dis_cont tr")) {
+                    table.put(tr.select("th").text(), tr.select("td").text());
+                }
+                item.put("title", name);
+                item.put("text", table);
+                list.add(item);
+            }
+        }
+        getContentWikiEditor(document, object);
+        getContentReferences(document, object);
+        content.put(getContentCategory(title), object);
+    }
+
+    private void parseMore3(Document document, JSONObject content, String title) {
+
+        Elements elements = document.select(".dis_panel_list");
         List<JSONObject> list = new ArrayList<>();
-        JSONObject jsonObject = new JSONObject().fluentPut("wiki_editor", wiki_editor)
-                .fluentPut("table", list);
-        JSONObject item = null;
-        for (Element tr : diffTable.select("tbody > tr")) {
-            Element th = tr.select("th").first();
-            String name = th.text();
-            String symptom = th.nextElementSibling().text();
-            String identification = th.nextElementSibling().nextElementSibling().text();
-            item = new JSONObject().fluentPut("疾病名", name)
-                    .fluentPut("体征/症状鉴别", symptom)
-                    .fluentPut("检验鉴别", identification);
+        JSONObject object = new JSONObject().fluentPut(title, list);
+        JSONObject item = new JSONObject();
+        for (Element li : elements.select("> li")) {
+            String name = li.select(".dis_t3").text();
+            String text = li.select(".dis_cont").text();
+            item.put("title", name);
+            item.put("text", text);
             list.add(item);
         }
-        JSONObject diagnosis = content.getJSONObject("diagnosis");
-        if (diagnosis == null) {
-            diagnosis = new JSONObject();
-        }
-        String title = document.select(".knw_thorough .hd").text();
-        diagnosis.put(title, jsonObject);
-        content.put("diagnosis", diagnosis);
+        getContentWikiEditor(document, object);
+        getContentReferences(document, object);
+        content.put(getContentCategory(title), object);
     }
-
-    private void parseMore(Document document, JSONObject content) {
-
-    }
-
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

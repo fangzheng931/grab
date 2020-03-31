@@ -48,7 +48,7 @@ public class DxyColumns {//TODO 只能看到最近的1500条
 		String prefix = "https://dxy.com/view/i/columns/article/list?";
 		for (int page = 1, totalPage = -1; page == 1 || page <= totalPage; page++) {
 			String url = prefix + "&items_per_page=30&page_index=" + page;
-			log.info(url);
+//			log.info(url);
 			JSONObject json = client.tryGet(url, -1).toJSONObject();
 			if (totalPage == -1) {
 				totalPage = (int) JSONPath.eval(json, "data.total_pages");
@@ -62,7 +62,7 @@ public class DxyColumns {//TODO 只能看到最近的1500条
 
 	protected void grabDetail(String id) {
 		if (detailTable.exists(id)) {
-			log.info("skip detail: " + id);
+//			log.info("skip detail: " + id);
 			return;
 		}
 		try {

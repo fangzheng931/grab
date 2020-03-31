@@ -2,6 +2,7 @@ package grab.dxy;
 
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
+import com.wayue.olympus.common.Progress;
 import com.wayue.olympus.common.http.HttpClient;
 import com.wayue.olympus.common.http.HttpContent;
 import com.wayue.olympus.common.http.HttpUtil;
@@ -36,8 +37,15 @@ public class DxyDrug {//TODO 验证码+每日访问限制
     private HttpClient client = new HttpClient();
 
     public static void main(String[] args) {
-        new DxyDrug().grabBrief();
+//        new DxyDrug().grabBrief();
+        DxyDrug dxyDrug = new DxyDrug();
+        Progress progress = new Progress("detail", briefTable.count(null), 5000);
+        for (MongoJsonEntity entity : briefTable.find(null)) {
+            dxyDrug.grabDetail(entity.getId());
+            progress.increase(1);
+        }
     }
+
 
     private Document getDocument(String url, String s) {
         Document document = client.tryGet(url, -1, HttpContent::toDocument, d -> !d.select("#kaptchaImage, p:contains(今天的访问次数用完，请明天继续访问！), " + s).isEmpty());
@@ -82,8 +90,14 @@ public class DxyDrug {//TODO 验证码+每日访问限制
     }
 
     private void grabCategory(String category, String prefix) {
-        for (int page = 1, totalPage = -1; page == 1 || page <= totalPage && page <= 50; page++) {
 
+        String maxId = prefix.replace("http://drugs.dxy.cn/category/", "")
+                .replace(".htm", "") + "-" + 6;
+        if (listTable.exists(maxId)) {
+            return;
+        }
+
+        for (int page = 1, totalPage = -1; page == 1 || page <= totalPage && page <= 50; page++) {
             String url = prefix + "?page=" + page;
             System.out.println(url);
             Document document = getDocument(url, ":containsOwn(该分类下共有药品：) > span");
@@ -100,6 +114,7 @@ public class DxyDrug {//TODO 验证码+每日访问限制
                 if (listTable.exists(lastId)) {
                     return;
                 } else if (listTable.exists(curId)) {
+                    System.out.println(lastId);
                     while (listTable.exists(curId)) {
                         curId = curId.replace("-" + page++, "-" + page);
                     }
@@ -152,7 +167,7 @@ public class DxyDrug {//TODO 验证码+每日访问限制
             return;
         }
         String url = "http://drugs.dxy.cn/drug/" + id + ".htm";
-        Document document = client.tryGet(url, -1, HttpContent::toDocument, null);
+        Document document = client.tryGet(url, 2, HttpContent::toDocument, p -> !p.select("p").select(".drugname").text().equals("今天的访问次数用完，请明天继续访问！"));
         String html = document.select(".detail").html();
         detailTable.save(new MongoBytesEntity(id, html.getBytes(), new JSONObject().fluentPut("url", url)));
     }

@@ -44,6 +44,7 @@ public class DxyDisease {//TODO https://dxy.com/robots.txt, 采100条就挂
 				throw new RuntimeException(href);
 			}
 			String name = li.text(), group = matcher.group("group");
+			System.out.println(name);
 			for (int page = 1, total_pages = 0; page == 1 || page < total_pages; page++) {
 				String url = "https://dxy.com/view/i/disease/list?section_group_name=" + group + "&page_index=" + page;
 				JSONObject json = client.tryGet(url, -1, c -> JSON.parseObject(c.toString()), j -> JSONPath.eval(j, "data.items") != null);
@@ -53,19 +54,20 @@ public class DxyDisease {//TODO https://dxy.com/robots.txt, 采100条就挂
 					briefTable.save(new MongoJsonEntity(id, item));
 				}
 				total_pages = (int) JSONPath.eval(json, "data.total_pages");
-				log.info(name + "\t" + group + "\t" + total_pages);
+//				log.info(name + "\t" + group + "\t" + total_pages);
 			}
 		}
 	}
 
 	private void grabDetail(String id) {
 		if (detailTable.exists(id)) {
-			log.info("skip detail: " + id);
+//			log.info("skip detail: " + id);
 			return;
 		}
-		log.info("grab detail: " + id);
+//		log.info("grab detail: " + id);
 		String url = "https://dxy.com/disease/" + id;
 		String cssQuery = ".disease-list";
+		System.out.println(url);
 		Document document = client.tryGet(url, 2, HttpContent::toDocument, d -> !d.select(cssQuery).isEmpty());
 		String html = document.select(cssQuery).html();
 		detailTable.save(new MongoBytesEntity(id, html.getBytes(), new JSONObject().fluentPut("url", url)));
