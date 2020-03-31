@@ -2,7 +2,6 @@ package grab.dxy;
 
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
-import com.wayue.olympus.common.Progress;
 import com.wayue.olympus.common.http.HttpClient;
 import com.wayue.olympus.common.http.HttpContent;
 import com.wayue.olympus.common.http.HttpUtil;
@@ -47,56 +46,57 @@ public class DxyDrug {//TODO 验证码+每日访问限制
     }
 
 
-    private Document getDocument(String url, String s) {
-        Document document = client.tryGet(url, -1, HttpContent::toDocument, d -> !d.select("#kaptchaImage, p:contains(今天的访问次数用完，请明天继续访问！), " + s).isEmpty());
-        if (!document.select("p:contains(今天的访问次数用完，请明天继续访问！)").isEmpty()) {
-            throw new RuntimeException("今天的访问次数用完，请明天继续访问！");
-        }
-        if (document.select("#kaptchaImage").isEmpty()) {
-            return document;
-        }
-        Element form = document.select("form[name=validation]").first();
-        RequestBuilder post = HttpUtil.post(form.attr("abs:action"));
-        for (Element input : form.select("input[type=hidden][name]:not(#validateCode)")) {
-            post.addParameter(input.attr("name"), input.attr("value"));
-        }
-        try {
-            HttpContent image = client.get(document.select("#kaptchaImage").attr("abs:src"));
-            try (ByteArrayInputStream is = new ByteArrayInputStream(image.getBytes())) {
-                //TODO 验证码识别
-                String validateCode = JOptionPane.showInputDialog(null, new ImageIcon(ImageIO.read(is)), "Captcha image", JOptionPane.PLAIN_MESSAGE);
-                post.addParameter("validateCode", validateCode);
-                client.doRequest(post.build());
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return getDocument(url, s);
-    }
+	private Document getDocument(String url, String s) {
+		Document document = client.tryGet(url, -1, HttpContent::toDocument, d -> !d.select("#kaptchaImage, p:contains(今天的访问次数用完，请明天继续访问！), " + s).isEmpty());
+		if (!document.select("p:contains(今天的访问次数用完，请明天继续访问！)").isEmpty()) {
+			throw new RuntimeException("今天的访问次数用完，请明天继续访问！");
+		}
+		if (document.select("#kaptchaImage").isEmpty()) {
+			return document;
+		}
+		Element form = document.select("form[name=validation]").first();
+		RequestBuilder post = HttpUtil.post(form.attr("abs:action"));
+		for (Element input : form.select("input[type=hidden][name]:not(#validateCode)")) {
+			post.addParameter(input.attr("name"), input.attr("value"));
+		}
+		try {
+			HttpContent image = client.get(document.select("#kaptchaImage").attr("abs:src"));
+			try (ByteArrayInputStream is = new ByteArrayInputStream(image.getBytes())) {
+				//TODO 验证码识别
+				String validateCode = JOptionPane.showInputDialog(null, new ImageIcon(ImageIO.read(is)), "Captcha image", JOptionPane.PLAIN_MESSAGE);
+				post.addParameter("validateCode", validateCode);
+				client.doRequest(post.build());
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		return getDocument(url, s);
+	}
 
-    private void grabBrief() {
-        Document document = getDocument("http://drugs.dxy.cn/index.htm", "[name=cur_cate]");
-        for (Element cur_cate : document.select("[name=cur_cate]")) {
-            String onclick = cur_cate.select("a").attr("onclick");
-            Matcher matcher = PatternCategory.matcher(onclick);
-            if (matcher.find()) {
-                String group = matcher.group("cate");
-                for (Element a : document.select("#cate_" + group + " h3 a")) {
-                    String url = a.attr("abs:href");
-                    grabCategory(a.text(), url);
-                }
-            }
-        }
-    }
+	private void grabBrief() {
+		Document document = getDocument("http://drugs.dxy.cn/index.htm", "[name=cur_cate]");
+		for (Element cur_cate : document.select("[name=cur_cate]")) {
+			String onclick = cur_cate.select("a").attr("onclick");
+			Matcher matcher = PatternCategory.matcher(onclick);
+			if (matcher.find()) {
+				String group = matcher.group("cate");
+				for (Element a : document.select("#cate_" + group + " h3 a")) {
+					String url = a.attr("abs:href");
+					grabCategory(a.text(), url);
+				}
+			}
+		}
+	}
 
     private void grabCategory(String category, String prefix) {
 
-        String maxId = prefix.replace("http://drugs.dxy.cn/category/", "")
-                .replace(".htm", "") + "-" + 6;
-        if (listTable.exists(maxId)) {
-            return;
+        {//跳过已存入的大类，减少访问
+            String maxId = prefix.replace("http://drugs.dxy.cn/category/", "")
+                    .replace(".htm", "") + "-" + 50;
+            if (listTable.exists(maxId)) {
+                return;
+            }
         }
-
         for (int page = 1, totalPage = -1; page == 1 || page <= totalPage && page <= 50; page++) {
             String url = prefix + "?page=" + page;
             System.out.println(url);
@@ -106,7 +106,7 @@ public class DxyDrug {//TODO 验证码+每日访问限制
                 totalPage = (count - 1) / 10 + 1;
 //				log.info(String.format("%s %d items, %d pages", category, count, totalPage));
             }
-            {//TODO save category list page
+            {//跳过已存入的页面
                 String curId = prefix.replace("http://drugs.dxy.cn/category/", "")
                         .replace(".htm", "") + "-" + page;
                 String lastId = curId.replace("-" + page, "-" + totalPage);
@@ -162,13 +162,13 @@ public class DxyDrug {//TODO 验证码+每日访问限制
         }
     }
 
-    private void grabDetail(String id) {
-        if (detailTable.exists(id)) {
-            return;
-        }
-        String url = "http://drugs.dxy.cn/drug/" + id + ".htm";
-        Document document = client.tryGet(url, 2, HttpContent::toDocument, p -> !p.select("p").select(".drugname").text().equals("今天的访问次数用完，请明天继续访问！"));
-        String html = document.select(".detail").html();
-        detailTable.save(new MongoBytesEntity(id, html.getBytes(), new JSONObject().fluentPut("url", url)));
-    }
+	private void grabDetail(String id) {
+		if (detailTable.exists(id)) {
+			return;
+		}
+		String url = "http://drugs.dxy.cn/drug/" + id + ".htm";
+		Document document = client.tryGet(url, -1, HttpContent::toDocument, null);
+		String html = document.select(".detail").html();
+		detailTable.save(new MongoBytesEntity(id, html.getBytes(), new JSONObject().fluentPut("url", url)));
+	}
 }

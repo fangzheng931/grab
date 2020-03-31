@@ -30,13 +30,13 @@ public class DxyColumns {//TODO 只能看到最近的1500条
 
 	public static void main(String[] args) {
 		DxyColumns dxyColumns = new DxyColumns();
-//		dxyColumns.grabBrief();
-//		for (MongoJsonEntity entity : briefTable.find(null)) {
-//			dxyColumns.grabDetail(entity.getId());
-//		}
-//		for (MongoJsonEntity entity : DxyColumnsSpecial.briefTable.find(null)) {
-//			dxyColumns.grabDetail(entity.getId());
-//		}
+		dxyColumns.grabBrief();
+		for (MongoJsonEntity entity : briefTable.find(null)) {
+			dxyColumns.grabDetail(entity.getId());
+		}
+		for (MongoJsonEntity entity : DxyColumnsSpecial.briefTable.find(null)) {
+			dxyColumns.grabDetail(entity.getId());
+		}
 		Progress progress = new Progress("detail", detailTable.count(null), 5000);
 		for (MongoBytesEntity entity : detailTable.find(null)) {
 			dxyColumns.parseDetail(entity);
