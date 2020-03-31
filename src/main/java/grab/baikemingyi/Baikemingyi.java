@@ -16,7 +16,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class Baikemingyi {
-
     private static final String database = "jiankangdangan";
     private static final MongoEntityClient mongo = new MongoEntityClient("101.132.96.214", 27017, "jiankangdangan", "jiankangdangan_user", "shanzhen@2020");
     private static MongoCollection<org.bson.Document> collection = mongo.getMongo().getDatabase(database).getCollection("baikemingyi");
