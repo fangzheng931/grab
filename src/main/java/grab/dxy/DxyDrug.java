@@ -2,6 +2,7 @@ package grab.dxy;
 
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
+import com.wayue.olympus.common.Progress;
 import com.wayue.olympus.common.http.HttpClient;
 import com.wayue.olympus.common.http.HttpContent;
 import com.wayue.olympus.common.http.HttpUtil;
