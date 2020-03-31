@@ -14,14 +14,13 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
-import javax.jws.Oneway;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-public class Haodaifuzhaoyao {
+public class HaodaifuDrug {
     private static final String database = "jiankangdangan";
     private static final Pattern PatternDetailUrl = Pattern.compile("\\Qhttps://www.haodf.com/yaopin/\\E(?<id>\\d+)\\.htm");
     private static final MongoEntityClient mongo = new MongoEntityClient("101.132.96.214", 27017, "jiankangdangan", "jiankangdangan_user", "shanzhen@2020");
@@ -31,7 +30,7 @@ public class Haodaifuzhaoyao {
     private HttpClient client = new HttpClient();
 
     public static void main(String[] args) {
-        Haodaifuzhaoyao haodaifuzhaoyao = new Haodaifuzhaoyao();
+        HaodaifuDrug haodaifuzhaoyao = new HaodaifuDrug();
 //        haodaifuzhaoyao.brief();
 //        for (MongoJsonEntity entity : briefTable.find(null)){
 //            haodaifuzhaoyao.grabDetail(entity);
@@ -110,9 +109,9 @@ public class Haodaifuzhaoyao {
     }
 
     private void parseDetail(MongoBytesEntity entity){
-//        if (parsedTable.exists(entity.getId())){
-//            return;
-//        }
+        if (parsedTable.exists(entity.getId())){
+            return;
+        }
         Document document = Jsoup.parse(new String(entity.getBytesContent()));
 
         JSONObject json = new JSONObject();
