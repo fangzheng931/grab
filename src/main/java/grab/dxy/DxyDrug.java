@@ -163,13 +163,17 @@ public class DxyDrug {//TODO 验证码+每日访问限制
         }
     }
 
-	private void grabDetail(String id) {
+	private void grabDetail(String id) {//TODO:每天限制浏览500条
 		if (detailTable.exists(id)) {
 			return;
 		}
 		String url = "http://drugs.dxy.cn/drug/" + id + ".htm";
-		Document document = client.tryGet(url, -1, HttpContent::toDocument, null);
-		String html = document.select(".detail").html();
+        Document document = client.tryGet(url, -1, HttpContent::toDocument, null);
+        System.out.println(url);
+        if (!document.select("p:contains(今天的访问次数用完，请明天继续访问！)").isEmpty()) {
+            throw new RuntimeException("今天的访问次数用完，请明天继续访问！");
+        }
+        String html = document.select(".detail").html();
 		detailTable.save(new MongoBytesEntity(id, html.getBytes(), new JSONObject().fluentPut("url", url)));
 	}
 }
