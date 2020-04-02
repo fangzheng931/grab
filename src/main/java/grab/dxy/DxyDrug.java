@@ -168,7 +168,8 @@ public class DxyDrug {//TODO 验证码+每日访问限制
 			return;
 		}
 		String url = "http://drugs.dxy.cn/drug/" + id + ".htm";
-        Document document = client.tryGet(url, -1, HttpContent::toDocument, null);
+//        Document document = client.tryGet(url, -1, HttpContent::toDocument, null);
+        Document document = getDocument(url, "");
         System.out.println(url);
         if (!document.select("p:contains(今天的访问次数用完，请明天继续访问！)").isEmpty()) {
             throw new RuntimeException("今天的访问次数用完，请明天继续访问！");
