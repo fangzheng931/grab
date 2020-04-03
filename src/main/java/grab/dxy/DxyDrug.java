@@ -13,6 +13,7 @@ import com.wayue.olympus.common.mongo.MongoJsonEntity;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.http.client.methods.RequestBuilder;
+import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.nodes.Node;
@@ -22,30 +23,37 @@ import org.jsoup.select.Elements;
 import javax.imageio.ImageIO;
 import javax.swing.*;
 import java.io.ByteArrayInputStream;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Slf4j
 public class DxyDrug {//TODO 验证码+每日访问限制
-    private static final Pattern PatternCategory = Pattern.compile("return selectCate\\(this, ?(?<cate>\\d+)\\)");
-    private static final Pattern PatternDetailUrl = Pattern.compile("\\Qhttp://drugs.dxy.cn/drug/\\E(?<id>\\d+)\\.htm");
-    private static final String database = "jiankangdangan";
-    private static final MongoEntityClient mongo = new MongoEntityClient("101.132.96.214", 27017, database, "jiankangdangan_user", "shanzhen@2020");
-    private static final MongoEntityTable<MongoJsonEntity> briefTable = mongo.getJsonTable(database, "DxyDrug-Brief");
-    private static final MongoEntityTable<MongoBytesEntity> detailTable = mongo.getBytesTable(database, "DxyDrug-Detail");
+	private static final Pattern PatternCategory = Pattern.compile("return selectCate\\(this, ?(?<cate>\\d+)\\)");
+	private static final Pattern PatternDetailUrl = Pattern.compile("\\Qhttp://drugs.dxy.cn/drug/\\E(?<id>\\d+)\\.htm");
+	private static final String database = "jiankangdangan";
+	private static final MongoEntityClient mongo = new MongoEntityClient("101.132.96.214", 27017, database, "jiankangdangan_user", "shanzhen@2020");
+	private static final MongoEntityTable<MongoJsonEntity> briefTable = mongo.getJsonTable(database, "DxyDrug-Brief");
+	private static final MongoEntityTable<MongoBytesEntity> detailTable = mongo.getBytesTable(database, "DxyDrug-Detail");
+	private static final MongoEntityTable<MongoJsonEntity> parsedTable = mongo.getJsonTable(database, "DxyDrug-Parsed");
     private static final MongoEntityTable<MongoBytesEntity> listTable = mongo.getBytesTable(database, "DxyDrug-List");
     private HttpClient client = new HttpClient();
 
-    public static void main(String[] args) {
-//        new DxyDrug().grabBrief();
-        DxyDrug dxyDrug = new DxyDrug();
-        Progress progress = new Progress("detail", briefTable.count(null), 5000);
-        for (MongoJsonEntity entity : briefTable.find(null)) {
-            dxyDrug.grabDetail(entity.getId());
-            progress.increase(1);
-        }
-    }
+	public static void main(String[] args) {
+		DxyDrug dxyDrug = new DxyDrug();
+//		dxyDrug.grabBrief();
+//		for (MongoJsonEntity entity : briefTable.find(null)) {
+//			dxyDrug.grabDetail(entity.getId());
+//		}
 
+//		dxyDrug.parseDetail(detailTable.get("125706"));
+		Progress progress = new Progress("detail", detailTable.count(null), 5000);
+		for (MongoBytesEntity entity : detailTable.find(null)) {
+			dxyDrug.parseDetail(entity);
+			progress.increase(1);
+		}
+	}
 
 	private Document getDocument(String url, String s) {
 		Document document = client.tryGet(url, -1, HttpContent::toDocument, d -> !d.select("#kaptchaImage, p:contains(今天的访问次数用完，请明天继续访问！), " + s).isEmpty());
@@ -168,13 +176,50 @@ public class DxyDrug {//TODO 验证码+每日访问限制
 			return;
 		}
 		String url = "http://drugs.dxy.cn/drug/" + id + ".htm";
-//        Document document = client.tryGet(url, -1, HttpContent::toDocument, null);
-        Document document = getDocument(url, "");
-        System.out.println(url);
-        if (!document.select("p:contains(今天的访问次数用完，请明天继续访问！)").isEmpty()) {
-            throw new RuntimeException("今天的访问次数用完，请明天继续访问！");
-        }
-        String html = document.select(".detail").html();
+//		Document document = client.tryGet(url, -1, HttpContent::toDocument, null);
+		Document document = getDocument(url,"");
+		if (!document.select("p:contains(今天的访问次数用完，请明天继续访问！)").isEmpty()) {
+			throw new RuntimeException("今天的访问次数用完，请明天继续访问！");
+		}
+		String html = document.select(".detail").html();
 		detailTable.save(new MongoBytesEntity(id, html.getBytes(), new JSONObject().fluentPut("url", url)));
+	}
+
+	private void parseDetail(MongoBytesEntity entity){
+		Document document = Jsoup.parse(new String(entity.getBytesContent()));
+		JSONObject json = new JSONObject();
+		List<JSONObject> detail = new ArrayList<>();
+		json.put("detail",detail);
+		JSONObject info = null;
+		int flag = 0;
+		for (Element element : document.select("dl > *")){
+			if (element.tagName().equals("dt")){
+					info = new JSONObject().fluentPut("title",element.select(".fl").text())
+							.fluentPut("texts",new JSONArray());
+					detail.add(info);
+			}else if (element.tagName().equals("dd")){
+				assert info != null;
+				flag++;
+				if (flag == 1){
+					String s = element.textNodes().toString().replaceAll("\\[","").replaceAll("\n","").replaceAll("]","").trim();
+					String[] data = s.split("：| ,  ");
+					JSONObject t = new JSONObject();
+					System.out.println(entity.getId());
+					for (int i = 0;i<data.length;i++){
+						t.put(data[i++],data[i].replaceAll(",",""));
+						if (i == 1){
+							json.put("title",data[i]);
+						}
+						System.out.println(data[1]);
+					}
+					info.getJSONArray("texts").add(t);
+				}else{
+					info.getJSONArray("texts").add(element.text());
+				}
+
+			}
+
+		}
+		parsedTable.save(new MongoJsonEntity(entity.getId(), json, entity.getJsonMetadata()));
 	}
 }
