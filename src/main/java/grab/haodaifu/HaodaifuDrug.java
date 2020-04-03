@@ -32,8 +32,10 @@ public class HaodaifuDrug {
     public static void main(String[] args) {
         HaodaifuDrug haodaifuzhaoyao = new HaodaifuDrug();
 //        haodaifuzhaoyao.brief();
+//        Progress progress = new Progress("brief", briefTable.count(null), 5000);
 //        for (MongoJsonEntity entity : briefTable.find(null)){
 //            haodaifuzhaoyao.grabDetail(entity);
+//            progress.increase(1);
 //        }
 
         Progress progress = new Progress("detail", detailTable.count(null), 5000);
@@ -47,16 +49,13 @@ public class HaodaifuDrug {
         Document document = client.tryGet("https://www.haodf.com/yaopin", -1).toDocument();
         for (Element drg :document.select(".drug-container .drg-con  > a")){
             String name = drg.text();
-            System.out.println(name);
             String url = drg.attr("abs:href");
-            System.out.println(url);
             grabBrief(name,url);
         }
     }
 
     private void grabBrief(String name,String url){
         for (int page = 1, totalPage = -1; page == 1 || page <= totalPage; page++){
-//            String id = url.replace("https://www.haodf.com/yaopin/","").replace("_1.html","");
             String url1 = url.replace("_1.html","")+"_"+page+".html";
             Document document = client.tryGet(url1, -1).toDocument();
             if (totalPage == -1 && !document.select(".page_turn_a font").isEmpty()){
@@ -65,7 +64,7 @@ public class HaodaifuDrug {
             for (Element list : document.select(".drug-list.clearfix .drug-list-con")){
                 String detailUrl = list.select(" a").attr("abs:href");
                 Matcher matcher = PatternDetailUrl.matcher(detailUrl);
-                if (!matcher.find()) {  //find可以对任意位置字符串匹配,其中start为起始查找索引值。
+                if (!matcher.find()) {
                     throw new RuntimeException(detailUrl);
                 }
                 String id = matcher.group("id");
@@ -100,7 +99,7 @@ public class HaodaifuDrug {
         }
 
         String url = "https://www.haodf.com/yaopin/" + id + ".html";
-        Document document = client.tryGet(url, -1, HttpContent::toDocument, null);
+        Document document = client.tryGet(url, -1, HttpContent::toDocument, d -> d.select(".r-tip02").isEmpty());
         Elements elements = document.select(".content.clearfix");
         if (elements.size()!=0){
             detailTable.save(new MongoBytesEntity(id, elements.html().getBytes(), new JSONObject().fluentPut("url", url)));
@@ -118,19 +117,19 @@ public class HaodaifuDrug {
         JSONObject basic = new JSONObject();
         String detailUrl = "https:"+document.select(".first-tit a").attr("href");
 
-//        Document document1 = client.tryGet(detailUrl, -1, HttpContent::toDocument, d -> !d.select(".drug-con-info").isEmpty());
         Document document1 = client.tryGet(detailUrl, -1).toDocument();
 
         for (Element info : document1.select(".drug-con-info")){
             basic.put(info.select("> h2").text(),info.select("> p").text());
         }
         json.put("basic", basic);
-        json.put("title",document.select(".first-tit").text());
+        json.put("title",document.select(".first-tit").first().ownText());
+        String[] prefixTitle = document.select(".first-tit").first().ownText().split(" ");
         for (Element info : document.select(".drug-info-detail")){
             if (!info.ownText().isEmpty()){
-                json.put(info.select(".blod").text().replace("：",""),info.ownText());
+                json.put(info.select(".blod").text().replace("：","").replace(prefixTitle[0],""),info.ownText());
             }else {
-                json.put(info.select(".blod").text().replace("：",""), info.select(".lable").stream()
+                json.put(info.select(".blod").text().replace("：","").replace(prefixTitle[0],""), info.select(".lable").stream()
                         .map(Element::text)
                                 .collect(Collectors.toList()));
             }
@@ -142,17 +141,15 @@ public class HaodaifuDrug {
                 json.put(pDetail[0],pDetail[1]);
             }
         }
-        String drugTogether = document.select(".drug-together .f18").text(); //药品搭配
         List<JSONObject> paragraphs = new ArrayList<>();
-        json.put(drugTogether, paragraphs);
-        JSONObject paragraph = new JSONObject();
+        json.put("药品搭配", paragraphs);
         List<String> thText = new ArrayList<>();
         for (Element th : document.select(".together-con th")){
             thText.add(th.text());
         }
         for (Element tr : document.select(".together-con tr")){
             int count =0;
-            paragraph = new JSONObject();
+            JSONObject paragraph = new JSONObject();
             if (tr.select("> td").isEmpty()){
                 continue;
             }
