@@ -163,7 +163,7 @@ public class DxyDrug {//TODO 验证码+每日访问限制
         }
     }
 
-	private void grabDetail(String id) {//TODO:每天限制浏览500条
+	private void grabDetail(String id) {
 		if (detailTable.exists(id)) {
 			return;
 		}
